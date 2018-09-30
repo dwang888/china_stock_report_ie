@@ -90,7 +90,7 @@ def clean_locale_digit(txt):
             digit_clean = locale.atof(rs.group())
             line_tmp = line_tmp[:rs.start()] + str(int(digit_clean)) + line_tmp[rs.end():]
             rs = re.search(r'\d+,\d+', line_tmp)
-            print(line_tmp)
+            # print(line_tmp)
         lines_new.append(line_tmp)
     # print(lines_new)
     return '\n'.join(lines_new)
@@ -101,11 +101,11 @@ def clean_currency_unit(txt):
     lines_new = []
     for line in lines:
         line_tmp = line
-        rs = re.search(r'\d+\.*\d*\s*万', line_tmp)
+        rs = re.search(r'\d+\.*\d*\s*(万|亿)', line_tmp)
         while rs != None:
-            print(rs.start(), rs.end(), rs.group())
-            print('----------------------------')
-            print(line_tmp)
+            # print(rs.start(), rs.end(), rs.group())
+            # print('----------------------------')
+            # print(line_tmp)
             if '万' in rs.group():
                 digitstr = rs.group().replace('万','')
                 digit = int(float(digitstr)*10000)
@@ -114,7 +114,7 @@ def clean_currency_unit(txt):
                 digit = int(float(digitstr)*100000000)
             line_tmp = line_tmp[:rs.start()] + str(digit) + line_tmp[rs.end():]
             rs = re.search(r'\d+\.*\d*\s*万', line_tmp)
-            print(line_tmp)
+            # print(line_tmp)
         lines_new.append(line_tmp)
     # print(lines_new)
     return '\n'.join(lines_new)
@@ -126,9 +126,9 @@ def transfer_date(txt):
         line_tmp = line
         rs = re.search(r'\d+年\d+月\d+日', line_tmp)
         while rs != None:
-            print(rs.start(), rs.end(), rs.group())
-            print('----------------------------')
-            print(line_tmp)
+            # print(rs.start(), rs.end(), rs.group())
+            # print('----------------------------')
+            # print(line_tmp)
             if '万' in rs.group():
                 digitstr = rs.group().replace('万', '')
                 digit = int(float(digitstr) * 10000)
@@ -137,9 +137,8 @@ def transfer_date(txt):
                 digit = int(float(digitstr) * 100000000)
             line_tmp = line_tmp[:rs.start()] + str(digit) + line_tmp[rs.end():]
             rs = re.search(r'\d+\.*\d*\s*万', line_tmp)
-            print(line_tmp)
+            # print(line_tmp)
         lines_new.append(line_tmp)
-    # print(lines_new)
     return '\n'.join(lines_new)
 
 
@@ -185,12 +184,13 @@ def cn2dig(src):
     return str(rsl)
 
 
-def parse_datetime(msg):
+def parse_cn_datetime(msg):
     if msg is None or len(msg) == 0:
         return None
     m = re.match(r"([0-9零一二两三四五六七八九十]+年)?([0-9一二两三四五六七八九十]+月)?([0-9一二两三四五六七八九十]+[号日])?([上下午晚早]+)?([0-9零一二两三四五六七八九十百]+[点:\.时])?([0-9零一二三四五六七八九十百]+分?)?([0-9零一二三四五六七八九十百]+秒)?",
         msg)
     if m.group(0) is not None:
+
         res = {
             "year": m.group(1),
             "month": m.group(2),
@@ -200,31 +200,100 @@ def parse_datetime(msg):
             "second": m.group(7) if m.group(7) is not None else '00',
             # "microsecond": '00',
         }
+
         params = {}
         for name in res:
             if res[name] is not None and len(res[name]) != 0:
                 params[name] = int(cn2dig(res[name][:-1]))
-        target_date = datetime.datetime.today().replace(**params)
+
+        # if there is no day, then do nothing, becasue DingZeng must have exact day!
+        if 'day' not in params:
+            return None
+
+
+        if (params['year']-2011)/4==0 and params['month']==2 and 'day' in params:#a stupid error: some doc has leap year has >28 days in Feb
+            params['day'] = min(params['day'],28)
+
+        if 'month' in params and params['month'] in (4,6,9,11) and 'day' in params:  # a stupid error: some doc has 31 day in Month 4,6,9, 11
+            params['day'] = min(params['day'], 30)
+
+        try:
+            target_date = datetime.today().replace(**params)
+
+        # target_date = datetime(params['year'],params['month'],params['day'])
+        except Exception:
+            print('ValueError: datetime is out of range!!!!!!!!!')
+            print(params)
+            return None
+
+
         is_pm = m.group(4)
         if is_pm is not None:
             if is_pm == u'下午' or is_pm == u'晚上':
                 hour = target_date.time().hour
                 if hour < 12:
                     target_date = target_date.replace(hour=hour + 12)
+
         return target_date
     else:
         return None
 
-def capture_date(txt):
-    # rs = re.search(r'(\d+年)?(\d+月)?(\d+日|号)?', txt)
-    rs = re.search(u'(\d+年)?(\d+月)?((\d+)(日|号))', txt)
-    if rs is not None:
-        rs_str = rs.group()
-        return rs_str
-    else:
-        return None
+def clean_date(txt):
+    pattern = r'[○|一|二|三|四|五|六|七|八|九]{2,4}年[一|二|三|四|五|六|七|八|九|十]{1,2}月(?:[一|二|三|四|五|六|七|八|九|十]{1,3}(日|号))?'
+    pattern_dt = r'(\d{2,4}年)(\d+月)(\d+(\s)*(日|号))?'
+
+
+    lines = txt.splitlines()
+    lines_new = []
+    for line in lines:
+        line_tmp = line
+        rs = re.search(pattern_dt, line_tmp)
+        while rs != None:
+            # print(rs.start(), rs.end(), rs.group())
+            # print('----------------------------')
+            # print(line_tmp)
+            # print(rs.group())
+            dt_str = rs.group()
+            dt_str = dt_str.replace(' ', '')
+            dt_new = None
+            # try:
+            dt_new = parse_cn_datetime(dt_str)
+            # except Exception:
+            #     print(line_tmp)
+            if dt_new is None:
+                dt_new = dt_str# if parsing failed, then use original txt
+            else:
+                dt_new = dt_new.strftime('%Y-%m-%d')
+            line_tmp = line_tmp[:rs.start()] + dt_new + line_tmp[rs.end():]
+            rs = re.search(pattern_dt, line_tmp)
+            # print(line_tmp)
+        lines_new.append(line_tmp)
+    # print(lines_new)
+    return '\n'.join(lines_new)
+
+def clean_image(txt_html):
+    txt_html = re.sub("(<img.*?>)", "", txt_html, 0, re.IGNORECASE | re.DOTALL | re.MULTILINE)
+    return txt_html
+
 
 if __name__ == '__main__':
+
+    #################### testing
+    txts = []
+    txts.append("注册资本：417,352 万元公司类型：国有独资")
+    txts.append("5000 万股股票,本次非公开发行股票的2018年11月03号发行对象前海基金以现金方式认购本次非公开发行的 5,000 万股股票。")
+    txts.append("大信会计师事务所有限公司于 2009年1月5 日出具了《ft东万杰高科技股份有限")
+    txts.append("销售收入突破8亿元")
+    txts.append("调整为公司第四届董事会第四次会议决议公告日(2011年2月29日),发行价格")
+    for txt in txts:
+        txt_clean = clean_width(txt)  # 全角半角
+        txt_clean = clean_locale_digit(txt_clean)  # remove comma
+        txt_clean = clean_currency_unit(txt_clean)  # currency unit
+        txt_clean = clean_date(txt_clean)
+        print(txt_clean)
+    sys.exit()
+    #################### /testing
+
 
     if os.path.isdir("C:\\projects\\fddc\\"):
         path_proj_folder = "C:\\projects\\fddc\\"
@@ -263,20 +332,8 @@ if __name__ == '__main__':
 
     df_output = pd.DataFrame()
 
-    txt = "注册资本：417,352 万元公司类型：国有独资"
-    txt = "5000 万股股票,本次非公开发行股票的2018年11月03号发行对象前海基金以现金方式认购本次非公开发行的 5,000 万股股票。"
-    txt_clean = clean_width(txt)  # 全角半角
-    txt_clean = clean_locale_digit(txt_clean)  # remove comma
-    txt_clean = clean_currency_unit(txt_clean)  # currency unit
 
-    # txt_clean = transfer_date(txt_clean)
 
-    dt_str = capture_date(txt_clean)
-    print(dt_str)
-    sys.exit()
-    dt = parse_datetime(dt_str)
-    print(dt)
-    sys.exit()
 
 
     for doc_id, path_html in report_files:
@@ -289,6 +346,8 @@ if __name__ == '__main__':
             txt_clean = clean_width(txt)  # 全角半角
             txt_clean = clean_locale_digit(txt_clean) # remove comma
             txt_clean = clean_currency_unit(txt_clean)#currency unit
+            txt_clean = clean_date(txt_clean)
+
             # file = codecs.open(os.path.join(path_dir_output_dz, doc_id+'_clean.html'), "w", "utf-8")
             # file.write(txt_clean)
             # file.close()
